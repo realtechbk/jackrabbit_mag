@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+
+# Test / lint / type-check caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Secrets / local env
+.env
+
+# Per-client DuckDB warehouses — regenerated from data/raw + migrations, never hand-edited
+data/warehouse/*.duckdb
+data/warehouse/*.duckdb.wal
+
+# Logs
+logs/*.log
+
+# Editor
+.vscode/
+.idea/

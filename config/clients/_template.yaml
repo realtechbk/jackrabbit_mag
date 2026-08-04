@@ -1,0 +1,16 @@
+# Template for onboarding a new client. Copy to config/clients/<client_id>.yaml
+# and fill in every CHANGE_ME. See docs/architecture/onboarding-new-client.md.
+#
+# A leading underscore in the filename (as in this file) marks it as a
+# template rather than a real client — cfo_platform.clients.registry.list_clients()
+# skips any config/clients/_*.yaml file.
+client_id: CHANGE_ME
+display_name: "CHANGE_ME"
+source_system: CHANGE_ME   # must match a SourceSystem value, e.g. jackrabbit_class
+timezone: America/New_York
+fiscal_year_start_month: 1
+warehouse_file: CHANGE_ME.duckdb
+raw_data_dir: data/clients/CHANGE_ME/raw
+contacts:
+  consultant: ""
+notes: ""

@@ -1,0 +1,17 @@
+# First platform client. This file is the seed of client-specific
+# configuration; the business context that justifies these values
+# currently lives at repo root (CLAUDE.md, PROJECT_CONTEXT.md,
+# DATA_DICTIONARY.md, DECISIONS.md) and has not yet been migrated here.
+client_id: mag
+display_name: "Maine Academy of Gymnastics"
+source_system: jackrabbit_class
+timezone: America/New_York
+fiscal_year_start_month: 1
+warehouse_file: mag.duckdb
+raw_data_dir: data/raw
+contacts:
+  consultant: "Al, RealTech <al@realtechbk.com>"
+notes: >
+  Legacy one-off analysis (scripts/, outputs/) predates this platform and is
+  not wired into the importer/analytics/reporting registries yet. See
+  docs/architecture/overview.md for the migration plan.

@@ -1,0 +1,12 @@
+# Runtime dependencies for cfo_platform.
+# Source of truth is pyproject.toml [project.dependencies]; this file exists
+# for environments that install with `pip install -r requirements.txt` instead
+# of `pip install -e .`. Keep the two in sync.
+duckdb>=1.0
+pandas>=2.2
+openpyxl>=3.1
+pydantic>=2.7
+pydantic-settings>=2.3
+PyYAML>=6.0
+typer>=0.12
+mcp>=1.0

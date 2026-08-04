@@ -1,0 +1,32 @@
+# Standard library logging.config.dictConfig, loaded by
+# src/cfo_platform/logging_config.py::setup_logging().
+version: 1
+disable_existing_loggers: false
+
+formatters:
+  standard:
+    format: "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
+    datefmt: "%Y-%m-%d %H:%M:%S"
+
+handlers:
+  console:
+    class: logging.StreamHandler
+    formatter: standard
+    stream: ext://sys.stdout
+  file:
+    class: logging.handlers.RotatingFileHandler
+    formatter: standard
+    filename: logs/cfo_platform.log
+    maxBytes: 5242880
+    backupCount: 3
+    encoding: utf-8
+
+loggers:
+  cfo_platform:
+    level: INFO
+    handlers: [console, file]
+    propagate: false
+
+root:
+  level: WARNING
+  handlers: [console]

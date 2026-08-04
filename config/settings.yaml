@@ -1,0 +1,20 @@
+# Non-secret default settings for cfo_platform. Environment variables
+# (see .env.example) override these at runtime — this file documents the
+# defaults and is safe to commit.
+#
+# This file is descriptive, not currently loaded by code: Settings in
+# src/cfo_platform/settings.py reads its defaults from field definitions and
+# from CFO_-prefixed environment variables / .env. Keeping this file in sync
+# with settings.py gives operators one place to see what's configurable
+# before wiring in a YAML loader for it.
+
+environment: development
+log_level: INFO
+
+data_root: data
+warehouse_dir: data/warehouse
+config_dir: config
+clients_config_dir: config/clients
+logging_config_path: config/logging.yaml
+
+default_client: mag
