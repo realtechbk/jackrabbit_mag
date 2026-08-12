@@ -52,3 +52,6 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+markers = [
+    "regression: permanent end-to-end regression tests against real data/raw/ files (slower; run with -m regression, exclude with -m 'not regression')",
+]

@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import pytest
 
-from cfo_platform.core.exceptions import ReconciliationError
+from cfo_platform.core.exceptions import ConfigurationError, ReconciliationError
 from cfo_platform.db.migrations.runner import migrate
 from cfo_platform.importers.jackrabbit.importer import FileExtract, JackrabbitClassImporter
 from cfo_platform.settings import REPO_ROOT
@@ -188,6 +188,31 @@ class TestRealDataEndToEnd:
             "raw_sales_detail_rows", "raw_class_list_rows",
         ]
         return {t: conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in tables}
+
+    def test_broken_pdftotext_environment_does_not_block_other_report_types(self, tmp_warehouse, monkeypatch):
+        """The real-world scenario this repo hits today: pdftotext exists
+        but isn't Poppler. That must exclude only the Revenue Summary PDFs
+        (as a clear, actionable failure) and still let Class/Event Revenue,
+        Sales Detail and Class List load normally in the same run."""
+        monkeypatch.setattr(
+            "cfo_platform.importers.jackrabbit.importer.check_pdftotext_is_poppler",
+            lambda *a, **kw: (_ for _ in ()).throw(ConfigurationError("no Poppler in this test")),
+        )
+        migrate(tmp_warehouse)
+        importer = _new_importer()
+        raw = importer.extract()
+        transformed = importer.transform(raw)
+
+        assert len(transformed.failures) == 4  # the four RevenueSummary_*.pdf files
+        assert all(extract.report_type == "revenue_summary" for extract, _ in transformed.failures)
+        assert len(transformed.loads) == 9  # class_event_revenue(4) + sales_detail(4) + class_list(1)
+
+        with pytest.raises(ReconciliationError):
+            importer.load(tmp_warehouse, transformed)
+
+        # the good data landed despite the raise above
+        assert tmp_warehouse.execute("SELECT COUNT(*) FROM fact_class_enrolment").fetchone()[0] > 0
+        assert tmp_warehouse.execute("SELECT COUNT(*) FROM fact_revenue").fetchone()[0] == 0
 
     def test_duplicate_file_is_not_reloaded_under_a_different_name(self, tmp_warehouse, tmp_path):
         """A byte-identical copy of an already-imported file, even saved

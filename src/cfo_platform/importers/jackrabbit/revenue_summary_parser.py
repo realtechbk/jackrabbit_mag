@@ -19,6 +19,17 @@ against:
 
 If scripts/parse_rsr.py is ever changed to fix a parsing bug, port the same
 fix here.
+
+IMPORTANT -- this parser only works with Poppler's `pdftotext`. The `-layout`
+flag's column-alignment heuristic is implementation-specific: Xpdf (and
+clones derived from it, including the one bundled with Git for Windows/MSYS2)
+lay out this report's columns differently, wrapping numeric fields onto lines
+that don't contain their row label. That breaks every regex above, and it
+fails in a way that looks like a data problem (a reconciliation variance)
+rather than an environment problem. check_pdftotext_is_poppler() exists
+specifically so that failure mode surfaces as a clear, actionable error
+instead -- callers should invoke it before run_pdftotext() whenever they're
+about to process a real PDF for the first time in a process.
 """
 
 from __future__ import annotations
@@ -27,6 +38,8 @@ import re
 import subprocess
 from pathlib import Path
 from typing import TypedDict
+
+from cfo_platform.core.exceptions import ConfigurationError
 
 MONEY = r"-?[\d,]+\.\d{2}"
 
@@ -48,15 +61,64 @@ class ParsedRevenueSummary(TypedDict):
     activities: list[ActivityLine]
 
 
-def run_pdftotext(pdf_path: Path) -> str:
+def _resolve_pdftotext_path(pdftotext_path: str | Path | None) -> str:
+    if pdftotext_path is not None:
+        return str(pdftotext_path)
+    from cfo_platform.settings import get_settings
+
+    configured = get_settings().pdftotext_path
+    return str(configured) if configured is not None else "pdftotext"
+
+
+def check_pdftotext_is_poppler(pdftotext_path: str | Path | None = None) -> None:
+    """Raise ConfigurationError unless the resolved `pdftotext` binary
+    identifies itself as Poppler.
+
+    Every pdftotext clone answers `-v`/`-h` with a version banner, but only
+    Poppler's mentions "Poppler" -- Xpdf's says only 'Copyright ... Glyph &
+    Cog, LLC' (Poppler forked from Xpdf and keeps that same attribution line,
+    so checking for Glyph & Cog would not distinguish them; checking for the
+    absence of "Poppler" is the reliable signal). The banner goes to stderr
+    for both, and Xpdf's `-v` even exits non-zero (99) -- so this checks
+    combined output text, not the exit code.
+    """
+    resolved = _resolve_pdftotext_path(pdftotext_path)
+    try:
+        result = subprocess.run(
+            [resolved, "-v"], capture_output=True, text=True, encoding="utf-8", errors="replace"
+        )
+    except FileNotFoundError as exc:
+        raise ConfigurationError(
+            f"pdftotext not found at {resolved!r}. Revenue Summary import requires Poppler's "
+            f"pdftotext -- install it (e.g. `conda install -c conda-forge poppler`) and either "
+            f"put it on PATH or set CFO_PDFTOTEXT_PATH to its full path."
+        ) from exc
+
+    banner = (result.stdout + result.stderr).strip()
+    if "poppler" not in banner.lower():
+        raise ConfigurationError(
+            f"pdftotext at {resolved!r} is not a Poppler build -- Revenue Summary parsing depends "
+            f"on Poppler's specific -layout column-alignment behaviour, and other builds (Xpdf and "
+            f"its clones, including the one bundled with Git for Windows/MSYS2) render this report's "
+            f"columns differently, silently breaking the parser. Detected banner: {banner!r}. "
+            f"Install Poppler (e.g. `conda install -c conda-forge poppler`) and either put its "
+            f"pdftotext first on PATH or set CFO_PDFTOTEXT_PATH to its full path."
+        )
+
+
+def run_pdftotext(pdf_path: Path, pdftotext_path: str | Path | None = None) -> str:
     """Run `pdftotext -layout` and return the extracted text.
 
-    Requires the `pdftotext` binary (poppler) on PATH -- see CLAUDE.md's
-    System tools section. Raises FileNotFoundError if it is missing, or
+    Requires a Poppler build of `pdftotext` -- see this module's docstring
+    and check_pdftotext_is_poppler(), which callers should run first.
+    Resolves the binary from `pdftotext_path`, then CFO_PDFTOTEXT_PATH
+    (Settings.pdftotext_path), then falls back to "pdftotext" on PATH.
+    Raises FileNotFoundError if it is missing, or
     subprocess.CalledProcessError if pdftotext itself fails.
     """
+    resolved = _resolve_pdftotext_path(pdftotext_path)
     result = subprocess.run(
-        ["pdftotext", "-layout", str(pdf_path), "-"],
+        [resolved, "-layout", str(pdf_path), "-"],
         capture_output=True,
         check=True,
         text=True,

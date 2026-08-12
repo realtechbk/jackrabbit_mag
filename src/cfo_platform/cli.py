@@ -9,7 +9,7 @@ from __future__ import annotations
 import typer
 
 from cfo_platform.clients.registry import list_clients, load_client
-from cfo_platform.core.exceptions import ReconciliationError
+from cfo_platform.core.exceptions import ConfigurationError, ReconciliationError
 from cfo_platform.db.connection import get_connection
 from cfo_platform.db.migrations.runner import migrate
 from cfo_platform.importers import jackrabbit  # noqa: F401 -- import registers JackrabbitClassImporter
@@ -65,6 +65,9 @@ def db_import(client_id: str) -> None:
         importer.run(conn)
     except ReconciliationError as exc:
         typer.echo(f"Reconciliation failed -- import refused: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    except ConfigurationError as exc:
+        typer.echo(f"Import environment is not usable: {exc}", err=True)
         raise typer.Exit(code=1) from exc
     finally:
         conn.close()

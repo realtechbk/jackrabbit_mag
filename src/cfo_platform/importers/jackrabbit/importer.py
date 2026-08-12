@@ -29,11 +29,12 @@ from typing import Any
 
 import duckdb
 
-from cfo_platform.core.exceptions import ReconciliationError
+from cfo_platform.core.exceptions import ConfigurationError, ReconciliationError
 from cfo_platform.importers.base import Importer
 from cfo_platform.importers.jackrabbit import dedupe, mapping, readers, validation
 from cfo_platform.importers.jackrabbit.revenue_summary_parser import (
     ParsedRevenueSummary,
+    check_pdftotext_is_poppler,
     label_for,
     parse,
     run_pdftotext,
@@ -63,7 +64,12 @@ class FileExtract:
     file_sha256: str
     file_bytes: int
     period_label: str | None
-    content: Any  # ParsedRevenueSummary for revenue_summary; list[dict] otherwise
+    # ParsedRevenueSummary for a successfully-parsed revenue_summary, list[dict]
+    # for the other report types, or a plain str for a revenue_summary that
+    # couldn't even be attempted (its content IS the reason why -- see
+    # extract()'s pdftotext-environment check). transform() branches on type,
+    # not report_type alone, to tell these apart.
+    content: Any
 
 
 @dataclass
@@ -113,9 +119,31 @@ class JackrabbitClassImporter(Importer):
     # ---------------------------------------------------------------- extract
 
     def extract(self) -> list[FileExtract]:
+        files = self.discover_files()
+
+        # Check once, up front, rather than letting each PDF fail differently
+        # later (a confusing per-file reconciliation variance instead of one
+        # obvious environment error) -- see revenue_summary_parser's module
+        # docstring. A failure here excludes ONLY revenue_summary files from
+        # this run (via the str-content sentinel below); an environment
+        # problem with PDF parsing must not block Class/Event Revenue, Sales
+        # Detail or Class List, which don't touch pdftotext at all.
+        pdftotext_error: str | None = None
+        if any(report_type == "revenue_summary" for report_type, _ in files):
+            try:
+                check_pdftotext_is_poppler()
+            except ConfigurationError as exc:
+                pdftotext_error = str(exc)
+                logger.error("pdftotext environment check failed -- excluding all Revenue "
+                             "Summary files from this run: %s", pdftotext_error)
+
         extracts = []
-        for report_type, path in self.discover_files():
+        for report_type, path in files:
             sha256, size = _file_identity(path)
+
+            if report_type == "revenue_summary" and pdftotext_error is not None:
+                extracts.append(FileExtract(report_type, path, sha256, size, None, pdftotext_error))
+                continue
 
             if report_type == "revenue_summary":
                 parsed: ParsedRevenueSummary = parse(run_pdftotext(path))
@@ -149,6 +177,12 @@ class JackrabbitClassImporter(Importer):
         }
         result = TransformResult()
         for extract in raw:
+            if isinstance(extract.content, str):
+                # extract() couldn't even attempt this file (currently only
+                # happens for revenue_summary when pdftotext isn't Poppler)
+                # -- content IS the reason, already logged there.
+                result.failures.append((extract, extract.content))
+                continue
             try:
                 result.loads.append(dispatch[extract.report_type](extract))
             except ReconciliationError as exc:

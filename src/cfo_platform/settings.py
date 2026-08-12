@@ -38,6 +38,13 @@ class Settings(BaseSettings):
 
     default_client: str | None = "mag"
 
+    # Revenue Summary parsing requires Poppler's pdftotext specifically --
+    # see importers/jackrabbit/revenue_summary_parser.py's module docstring.
+    # None means "resolve 'pdftotext' from PATH"; set CFO_PDFTOTEXT_PATH to
+    # point at a specific binary when the right build isn't (or shouldn't be)
+    # first on PATH.
+    pdftotext_path: Path | None = None
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
