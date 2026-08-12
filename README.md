@@ -3,8 +3,19 @@
 Analysis of MAG's revenue and unit economics by service line, built from Jackrabbit Class exports.
 Client engagement run by RealTech (Al, al@realtechbk.com).
 
-**Status:** revenue and unit counts complete and reconciled for 2023, 2024, 2025 and 2026 YTD.
-Cost of Sales not started — needs coach payroll. See `CURRENT_STATUS.md`.
+**Status:** revenue and unit counts complete and reconciled for 2023, 2024, 2025 and 2026 YTD, on
+both tracks below. Cost of Sales not started on either track — needs coach payroll (Phase 3, the
+current priority). See `CURRENT_STATUS.md`.
+
+## Two tracks in one repo
+
+| Track | Location | State |
+|---|---|---|
+| **Legacy MAG analysis** | `scripts/`, `outputs/`, `data/raw/` | Working, delivered. Hardcoded-figure pipeline. This is what the analysis docs describe. |
+| **AI CFO platform** | `src/cfo_platform/`, `config/`, `tests/` | `JackrabbitClassImporter` built and verified against real MAG data (45 tests passing) — see `CURRENT_STATUS.md`. No `Analyzer`/`ReportBuilder` yet, no payroll ingestion. |
+
+See `ARCHITECTURE.md`. The analysis rules in `CLAUDE.md` shaped the platform's Jackrabbit importer and
+will shape the payroll importer that comes next.
 
 ---
 
@@ -14,9 +25,10 @@ Cost of Sales not started — needs coach payroll. See `CURRENT_STATUS.md`.
 |---|---|
 | **`CLAUDE.md`** | Operating rules. **Read before touching anything.** The reconciliation gate and the units rule are non-negotiable. |
 | **`CURRENT_STATUS.md`** | What is done, partly done, not started, and what is broken. |
+| **`ARCHITECTURE.md`** | The legacy-vs-platform split and the platform layout. |
 | **`PROJECT_CONTEXT.md`** | The business, the reports, the findings, the numbers. |
 | **`DATA_DICTIONARY.md`** | Column definitions, parsing traps, join reliability. |
-| **`DECISIONS.md`** | Why things are the way they are — including three reversed decisions. |
+| **`DECISIONS.md`** | Why things are the way they are — including three reversed decisions and one retracted metric. |
 | **`NEXT_STEPS.md`** | Prioritised task list. Start at Priority 1. |
 
 ---
@@ -25,14 +37,25 @@ Cost of Sales not started — needs coach payroll. See `CURRENT_STATUS.md`.
 
 ```
 jackrabbit-mag/
-├── CLAUDE.md · CURRENT_STATUS.md · PROJECT_CONTEXT.md
+├── CLAUDE.md · CURRENT_STATUS.md · ARCHITECTURE.md · PROJECT_CONTEXT.md
 ├── DATA_DICTIONARY.md · DECISIONS.md · NEXT_STEPS.md · README.md
+├── pyproject.toml · requirements.txt · requirements-dev.txt · .env.example
+│
 ├── data/raw/            Source Jackrabbit exports, unmodified
-├── scripts/             Build scripts and the PDF parser
+├── scripts/             Legacy build scripts and the PDF parser
 ├── outputs/             Current deliverables
 │   └── superseded/      Earlier versions, retained deliberately
-└── docs/                Supporting notes
+│
+├── src/cfo_platform/    Platform scaffold (see ARCHITECTURE.md)
+├── config/              settings.yaml, logging.yaml, clients/mag.yaml
+├── tests/               unit/ + integration/, pytest
+├── docs/architecture/   Overview, data model, ADRs, client onboarding
+└── logs/
 ```
+
+**Working in both tools?** Claude Code for the platform, git, tests and script edits. Cowork for
+client-facing Excel/Word deliverables, reading source PDFs and visual checks. `CLAUDE.md` has the
+split and the one command that differs between them.
 
 ### `data/raw/` — source exports (all run 28 July 2026)
 
@@ -59,22 +82,38 @@ jackrabbit-mag/
 
 ## Setup
 
-### Python
+### Platform track (Python ≥ 3.11)
+```bash
+python -m venv .venv && source .venv/bin/activate    # Windows: .venv\Scripts\activate
+pip install -e ".[dev]"        # or: pip install -r requirements.txt -r requirements-dev.txt
+cp .env.example .env
+pytest -q                      # 45 tests should pass — see "System tools" for the pdftotext gotcha
+cfo-platform clients           # CLI smoke test
+cfo-platform db-import mag     # run the real Jackrabbit importer against data/raw/
+```
+`pyproject.toml` is the source of truth for dependencies; keep `requirements.txt` in sync.
+`pytest -m regression` runs only the real-PDF revenue regression suite;
+`pytest -m "not regression"` skips it for a faster local loop.
+
+### Legacy analysis track only
+If you only need to regenerate the Excel/Word deliverables:
 ```bash
 pip install openpyxl pandas
-```
-
-### Node (only for the Word document)
-```bash
-npm install docx
+npm install docx               # only for the Word profile
 ```
 
 ### System tools
 ```bash
 # Debian/Ubuntu
 sudo apt-get install poppler-utils libreoffice
+# Windows / conda (any OS) — if pdftotext is already on PATH, confirm it's Poppler before relying on it
+conda install -c conda-forge poppler
 ```
-- `pdftotext` (poppler) — **required** by `parse_rsr.py`
+- `pdftotext` — **required** by `parse_rsr.py` (legacy) and `JackrabbitClassImporter` (platform), and
+  it must be a **Poppler** build specifically. Xpdf and Xpdf-derived clones (including the one bundled
+  with Git for Windows/MSYS2) render this report's `-layout` output differently and silently break the
+  parser. The platform importer checks this automatically and raises a clear error if it's wrong; the
+  legacy script does not. Set `CFO_PDFTOTEXT_PATH` if Poppler isn't first on PATH.
 - `soffice` (LibreOffice) — recalculates workbooks and renders PDFs for visual checks
 - `pdftoppm` (poppler) — renders PDF pages to images
 
@@ -97,16 +136,30 @@ The script prints a reconciliation line per period. **All four must read `var=0.
 ### Recalculate (mandatory after writing any xlsx)
 `openpyxl` writes formulas with **no cached values** — until recalculated, every formula cell reads
 back as `None` to pandas and to most previewers.
-```bash
-python <path-to>/xlsx/scripts/recalc.py outputs/MAG_ServiceLinePerformance_v8.xlsx
-```
-Require `"status": "success"` and `"total_errors": 0`. A green recalc proves formulas *evaluate*, not
-that they are *right* — spot-check two or three values.
 
-If that helper is unavailable, LibreOffice will do it:
+**In VS Code / anywhere** — LibreOffice does it, and the round-trip populates cached values:
 ```bash
 soffice --headless --convert-to xlsx --outdir /tmp outputs/MAG_ServiceLinePerformance_v8.xlsx
+cp /tmp/MAG_ServiceLinePerformance_v8.xlsx outputs/
 ```
+Then confirm the values actually landed:
+```bash
+python -c "
+from openpyxl import load_workbook
+ws = load_workbook('outputs/MAG_ServiceLinePerformance_v8.xlsx', data_only=True)['Service Performance']
+print('variance row (must be four zeros):', [ws.cell(row=40, column=c).value for c in (12,13,14,15)])
+print('class enrolments:', [ws.cell(row=8, column=c).value for c in (4,5,6,7)])
+"
+```
+
+**In Cowork** — use the `xlsx` skill's `recalc.py`, which reports formula errors explicitly:
+```bash
+python <xlsx-skill>/scripts/recalc.py outputs/MAG_ServiceLinePerformance_v8.xlsx
+```
+Require `"status": "success"` and `"total_errors": 0`.
+
+Either way: a green recalc proves formulas *evaluate*, not that they are *right* — spot-check two or
+three values.
 
 ### Visual check before shipping
 Two real bugs were caught this way — a summary block overlapping a header row, and a label starting
