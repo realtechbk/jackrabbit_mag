@@ -1,7 +1,7 @@
 """Command-line entrypoint for cfo_platform (`cfo-platform` once installed).
 
-`clients` and `db-migrate` work today. `db-import` and `report` are stubs —
-importer and analytics logic don't exist yet.
+`clients`, `db-migrate` and `db-import` work today. `report` is a stub —
+reporting/analytics logic doesn't exist yet.
 """
 
 from __future__ import annotations
@@ -9,11 +9,16 @@ from __future__ import annotations
 import typer
 
 from cfo_platform.clients.registry import list_clients, load_client
+from cfo_platform.core.exceptions import ReconciliationError
 from cfo_platform.db.connection import get_connection
 from cfo_platform.db.migrations.runner import migrate
-from cfo_platform.logging_config import setup_logging
+from cfo_platform.importers import jackrabbit  # noqa: F401 -- import registers JackrabbitClassImporter
+from cfo_platform.importers.registry import get_importer_class
+from cfo_platform.logging_config import get_logger, setup_logging
+from cfo_platform.settings import REPO_ROOT
 
 app = typer.Typer(help="AI CFO platform CLI")
+logger = get_logger(__name__)
 
 
 @app.command()
@@ -42,10 +47,29 @@ def db_migrate(client_id: str) -> None:
 
 @app.command(name="db-import")
 def db_import(client_id: str) -> None:
-    """Run this client's import pipeline. Not implemented yet."""
-    raise NotImplementedError(
-        "Importer logic hasn't been built yet — see docs/architecture/overview.md"
-    )
+    """Run this client's import pipeline.
+
+    Applies pending migrations first, then runs the Importer registered for
+    the client's source_system (config/clients/<client_id>.yaml) against its
+    raw_data_dir. Refuses to load (raises) if any period fails reconciliation
+    -- CLAUDE.md rule 1 -- rather than loading a partially-wrong period.
+    """
+    setup_logging()
+    profile = load_client(client_id)
+    importer_cls = get_importer_class(profile.source_system.value)
+    importer = importer_cls(client_id=client_id, raw_data_dir=REPO_ROOT / profile.raw_data_dir)
+
+    conn = get_connection(client_id)
+    try:
+        migrate(conn)
+        importer.run(conn)
+    except ReconciliationError as exc:
+        typer.echo(f"Reconciliation failed -- import refused: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    finally:
+        conn.close()
+
+    typer.echo(f"Import complete for {client_id}.")
 
 
 @app.command()

@@ -72,29 +72,43 @@ until the layers above them exist.
   the source report" is a typed failure, not a printed variance someone can
   ignore.
 
-## What's explicitly NOT here yet
+## What's built (Phase 2) and what's still NOT here
 
-- No concrete `Importer` (Jackrabbit Class parsing lives only in the legacy
-  `scripts/parse_rsr.py`, not ported).
-- No concrete `Analyzer` (service-line profitability, cost-of-sales
-  allocation).
-- No concrete `ReportBuilder` (the legacy `scripts/build_*.py` outputs are
-  not wired in).
-- No business/warehouse schema beyond the bootstrap `import_runs` and
-  `schema_migrations` tables — see `docs/architecture/data-model.md`.
-- No real MCP tools beyond a `ping` health check.
+- **`JackrabbitClassImporter`** (`importers/jackrabbit/`) — extract/transform/
+  load for all four Jackrabbit exports, registered for
+  `source_system: jackrabbit_class`. The Revenue Summary PDF parsing is a
+  faithful port of `scripts/parse_rsr.py` (same algorithm, same documented
+  traps), not a rewrite. Runs via `cfo-platform db-import <client_id>`.
+- **Warehouse schema for revenue and class enrolment** exists (migrations
+  `0002_jackrabbit_raw`, `0003_mag_service_line_facts` — see
+  `docs/architecture/data-model.md`). Reconciliation to the Revenue Summary's
+  stated total is enforced as a typed `ReconciliationError` at load time
+  (CLAUDE.md rule 1), and de-duplication of class enrolment on
+  `Class + Session + Cat3` (rule 5) is verified exact against the legacy
+  analysis's 5,684 / 6,199 / 6,341 totals for 2023-2025 — see
+  `tests/integration/test_jackrabbit_importer.py`.
+- Still **no concrete `Analyzer`** (service-line profitability, cost-of-sales
+  allocation) — the warehouse has revenue and enrolment facts, but nothing
+  yet computes the grid in `outputs/MAG_ServiceLinePerformance_v8.xlsx` from
+  them.
+- Still **no concrete `ReportBuilder`** (the legacy `scripts/build_*.py`
+  outputs are not wired in).
+- Still **no cost-of-sales / payroll** anything — out of scope until a
+  payroll data source is chosen (unchanged from before Phase 2).
+- Still **no real MCP tools** beyond a `ping` health check — explicitly out
+  of scope for this phase.
+- Sales Detail and Class List land in raw tables only; no unit-level
+  analytics (Pro Shop item classification, coach hours) are built on them
+  yet.
 
 ## Migrating the legacy MAG analysis
 
-Not done as part of this scaffold. When it happens, the shape is:
+Partially done (Phase 2, above): the importer and warehouse schema exist.
+What's left:
 
-1. Write a `JackrabbitClassImporter(Importer)` that reuses the parsing logic
-   in `scripts/parse_rsr.py` (Revenue Summary PDF) and the `.xls`/`.xlsx`
-   readers used by `scripts/build_*.py`, but writes into DuckDB tables
-   instead of Python dicts.
-2. Design the warehouse schema those tables need (a migration after
-   `0001_init`), informed by `DATA_DICTIONARY.md` and the de-duplication /
-   units-vs-revenue rules in `CLAUDE.md`.
+1. ~~Write a `JackrabbitClassImporter(Importer)`~~ — done.
+2. ~~Design the warehouse schema~~ — done for revenue and class enrolment;
+   Sales Detail / Class List unit analytics still to design.
 3. Write a `ServiceLineProfitabilityAnalyzer(Analyzer)` that reproduces the
    grid in `outputs/MAG_ServiceLinePerformance_v8.xlsx` from the warehouse.
 4. Only then does a `ReportBuilder` or MCP tool make sense — they render or
